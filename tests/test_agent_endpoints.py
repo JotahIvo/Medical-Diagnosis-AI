@@ -20,18 +20,15 @@ SESSION_ID = str(uuid.uuid4())
 
 @pytest.fixture(scope="module")
 def client():
-    """Cria um TestClient que respeita o lifespan da aplicação."""
     with TestClient(app) as c:
         yield c
 
 @pytest.fixture(scope="module", autouse=True)
 def setup_test_user(client: TestClient):
-    """Garante que o usuário de teste para estes endpoints exista."""
     client.post("/user/register", json=TEST_USER)
     yield
 
 def get_auth_token(client: TestClient) -> str:
-    """Helper para obter um token de autenticação."""
     logger.info(f"Authenticating user '{TEST_USER['username']}' to get token...")
     login_data = {
         "username": TEST_USER["username"],
@@ -44,17 +41,10 @@ def get_auth_token(client: TestClient) -> str:
     logger.info("Token obtained successfully.")
     return token
 
-# ==========================================================================
-# TESTES APRIMORADOS PARA OS ENDPOINTS DOS AGENTES
-# ==========================================================================
 
 def test_symptom_analyzer_endpoint(client: TestClient):
-    """
-    Testa o endpoint do Agente Analisador de Sintomas com logs e tratamento de erro.
-    """
     logger.info("--- STARTING ENDPOINT TEST: /agent/symptom_analyzer ---")
     try:
-        # Arrange: Preparar autenticação e dados
         logger.info("Arrange Phase: Obtaining token and preparing payload.")
         token = get_auth_token(client)
         headers = {"Authorization": f"Bearer {token}"}
@@ -64,11 +54,9 @@ def test_symptom_analyzer_endpoint(client: TestClient):
         }
         logger.info(f"Payload to be sent: {payload}")
 
-        # Act: Chamar o endpoint
         logger.info("Act Phase: Sending POST request.")
         response = client.post("/agent/symptom_analyzer", headers=headers, json=payload)
-        
-        # Assert: Validar a resposta
+     
         logger.info(f"Response received. Status Code: {response.status_code}")
         assert response.status_code == 200
         
@@ -87,12 +75,8 @@ def test_symptom_analyzer_endpoint(client: TestClient):
 
 
 def test_clinical_protocol_endpoint(client: TestClient):
-    """
-    Testa o endpoint do Agente de Protocolo Clínico com logs e tratamento de erro.
-    """
     logger.info("--- STARTING ENDPOINT TEST: /agent/clinical protocol ---")
     try:
-        # Arrange: Preparar autenticação e dados de input complexos
         logger.info("Arrange Phase: Obtaining token and preparing payload.")
         token = get_auth_token(client)
         headers = {"Authorization": f"Bearer {token}"}
@@ -109,11 +93,9 @@ def test_clinical_protocol_endpoint(client: TestClient):
         }
         logger.info(f"Payload to be sent: {payload}")
 
-        # Act: Chamar o endpoint
         logger.info("Act Phase: Sending POST request.")
         response = client.post("/agent/clinical_protocol", headers=headers, json=payload)
         
-        # Assert: Validar a resposta
         logger.info(f"Response received. Status Code: {response.status_code}")
         assert response.status_code == 200
         

@@ -9,7 +9,7 @@ from starlette.websockets import WebSocketState
 
 from app.depends.depends import token_verifier
 from app.auth.auth_user import UserUseCases
-from app.schemas.agents_schemas import SymptomInput, MedicalDiagnosisResponse, ClinicalAction, DiagnosisHypothesis, ClinicalProtocolInput
+from app.schemas.agents_schemas import SymptomInput, ClinicalAction, DiagnosisHypothesis, ClinicalProtocolInput
 
 
 agent_router = APIRouter(prefix="/agent")
@@ -54,7 +54,6 @@ async def analyze_symptoms(
 ):
     logger.info(f"Calling Symptom Analyzer for session {input_data.session_id}.")
 
-    # O agente agora lida com o histórico. Apenas enviamos a nova mensagem.
     response: RunResponse = await agent.arun(
         message=input_data.symptoms, 
         session_id=input_data.session_id, 
@@ -74,9 +73,6 @@ async def analyze_symptoms(
         raise HTTPException(status_code=500, detail="Error processing diagnosis.")
 
 
-# ==========================================================================
-# ENDPOINT 2: PROTOCOLO CLÍNICO (VERSÃO FINAL SIMPLIFICADA)
-# ==========================================================================
 @agent_router.post("/clinical_protocol", response_model=ClinicalAction, summary="Get Clinical Action Plan")
 async def get_clinical_protocol(
     input_data: ClinicalProtocolInput,
@@ -85,7 +81,6 @@ async def get_clinical_protocol(
 ):
     logger.info(f"Calling Clinical Protocol for session {input_data.session_id}.")
     
-    # O agente lida com o histórico. Apenas formatamos e enviamos a nova entrada.
     agent_input = f"Diagnostic hypothesis: {input_data.diagnosis.diagnosis}. Justification: {input_data.diagnosis.justification}."
     
     response: RunResponse = await agent.arun(
@@ -107,7 +102,6 @@ async def get_clinical_protocol(
         raise HTTPException(status_code=500, detail="Error processing clinical action plan.")
 
 
-# ------------------- WEBSOCKET -------------------
 async def token_verifier_ws(token: str = Query(...)):
     user = await token_verifier({"Authorization": f"Bearer {token}"})
     if not user:
@@ -117,28 +111,18 @@ async def token_verifier_ws(token: str = Query(...)):
 
 @agent_router.websocket("/ws/orchestrator")
 async def websocket_orchestrator(websocket: WebSocket, token: str):
-    """
-    Orquestrador via WebSocket que realiza o fluxo completo de diagnóstico.
-    Exige um token JWT válido como query parameter.
-    """
-    # =================================================================
-    # BLOCO DE AUTENTICAÇÃO CORRIGIDO
-    # =================================================================
     db_session = websocket.app.state.db_session_gen()
+
     try:
-        # Replicamos a lógica do 'token_verifier' diretamente aqui, que é mais simples
         user_use_cases = UserUseCases(db_session=db_session)
         user = user_use_cases.verify(access_token=token)
     except Exception as auth_error:
         logger.warning(f"WebSocket auth failed for token '{token[:10]}...': {auth_error}")
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Authentication failed")
-        db_session.close() # Garante que a sessão seja fechada em caso de falha
+        db_session.close() 
         return
     finally:
-        # Fechamos a sessão de autenticação, pois ela não será mais usada.
-        # As chamadas dos agentes usarão suas próprias sessões internas.
         db_session.close()
-    # =================================================================
 
     await websocket.accept()
     logger.info(f"WebSocket connection accepted for user: {user.get('sub')}")
@@ -158,15 +142,11 @@ async def websocket_orchestrator(websocket: WebSocket, token: str):
         user_id = user.get("user_id")
         session_id = input_data.session_id
 
-        # --- FLUXO DO ORQUESTRADOR ---
-
-        # Etapa A: Analisador de Sintomas
         await websocket.send_json({"status": "Step 1/4: Analyzing symptoms..."})
         response_agent_a: RunResponse = await symptom_analyzer_agent.arun(
             message=input_data.symptoms, session_id=session_id, user_id=str(user_id)
         )
-        # ... (o resto da lógica do fluxo continua exatamente igual) ...
-        # ... (copie o resto do seu fluxo que já estava aqui) ...
+        
         hypothesis_content = response_agent_a.content
         if not hypothesis_content:
             raise ValueError("Symptom Analyzer Agent did not produce any content.")
@@ -178,12 +158,10 @@ async def websocket_orchestrator(websocket: WebSocket, token: str):
             "data": diagnosis_hypothesis.model_dump()
         })
 
-        # Etapa B: Memorização (Agente A)
         await websocket.send_json({"status": "Step 2/4: Saving initial diagnosis to memory..."})
         memory_task_a = f"Based on our last interaction, please save this to your memory: The user's symptoms are '{input_data.symptoms}' and the diagnosis was '{diagnosis_hypothesis.diagnosis}'."
         await symptom_analyzer_agent.arun(message=memory_task_a, session_id=session_id, user_id=str(user_id))
 
-        # Etapa C: Protocolo Clínico
         await websocket.send_json({"status": "Step 3/4: Generating clinical plan..."})
         clinical_input_message = f"Diagnostic hypothesis: {diagnosis_hypothesis.diagnosis}. Justification: {diagnosis_hypothesis.justification}. Severity: {diagnosis_hypothesis.severity}."
         response_agent_b: RunResponse = await clinical_protocol_agent.arun(
@@ -200,7 +178,6 @@ async def websocket_orchestrator(websocket: WebSocket, token: str):
             "data": clinical_action.model_dump()
         })
         
-        # Etapa D: Memorização (Agente B)
         await websocket.send_json({"status": "Step 4/4: Saving clinical plan to memory..."})
         memory_task_b = f"For the diagnosis of '{diagnosis_hypothesis.diagnosis}', the suggested clinical plan has an urgency of '{clinical_action.urgency}'."
         await clinical_protocol_agent.arun(message=memory_task_b, session_id=session_id, user_id=str(user_id))
