@@ -3,7 +3,7 @@ import logging
 
 from typing import Annotated
 from fastapi import APIRouter, Depends, status, HTTPException, Request
-from fastapi import WebSocket, WebSocketDisconnect, Query
+from fastapi import WebSocket, WebSocketDisconnect
 from agno.agent import RunResponse, Agent
 from starlette.websockets import WebSocketState
 
@@ -52,6 +52,7 @@ async def analyze_symptoms(
     user: dict = Depends(get_current_user),
     agent: Agent = Depends(get_symptom_analyzer_agent_dependency)
 ):
+    
     logger.info(f"Calling Symptom Analyzer for session {input_data.session_id}.")
 
     response: RunResponse = await agent.arun(
@@ -62,7 +63,10 @@ async def analyze_symptoms(
     
     final_content = response.content
     if not final_content:
-        raise HTTPException(status_code=500, detail="Agent did not produce content.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail="Agent did not produce content."
+        )
 
     try:
         decoder = json.JSONDecoder()
@@ -70,10 +74,13 @@ async def analyze_symptoms(
         return DiagnosisHypothesis.model_validate(obj)
     except Exception as e:
         logger.error(f"Failed to parse JSON from Symptom Analyzer: {e}. Content: {final_content}")
-        raise HTTPException(status_code=500, detail="Error processing diagnosis.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail="Error processing diagnosis."
+        )
 
 
-@agent_router.post("/clinical_protocol", response_model=ClinicalAction, summary="Get Clinical Action Plan")
+@agent_router.post("/clinical_protocol", response_model=ClinicalAction, summary="Get Clinical Action Protocol")
 async def get_clinical_protocol(
     input_data: ClinicalProtocolInput,
     user: dict = Depends(get_current_user),
@@ -91,7 +98,10 @@ async def get_clinical_protocol(
     
     final_content = response.content
     if not final_content:
-        raise HTTPException(status_code=500, detail="Agent did not produce content.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail="Agent did not produce content."
+        )
 
     try:
         decoder = json.JSONDecoder()
@@ -99,14 +109,14 @@ async def get_clinical_protocol(
         return ClinicalAction.model_validate(obj)
     except Exception as e:
         logger.error(f"Failed to parse JSON from Clinical Protocol Agent: {e}. Content: {final_content}")
-        raise HTTPException(status_code=500, detail="Error processing clinical action plan.")
+        raise HTTPException(status_code=500, detail="Error processing clinical action protocol.")
 
 
-async def token_verifier_ws(token: str = Query(...)):
+""" async def token_verifier_ws(token: str = Query(...)):
     user = await token_verifier({"Authorization": f"Bearer {token}"})
     if not user:
         return None
-    return user
+    return user """
 
 
 @agent_router.websocket("/ws/orchestrator")
@@ -142,9 +152,11 @@ async def websocket_orchestrator(websocket: WebSocket, token: str):
         user_id = user.get("user_id")
         session_id = input_data.session_id
 
-        await websocket.send_json({"status": "Step 1/4: Analyzing symptoms..."})
+        await websocket.send_json({"status": "Analyzing symptoms..."})
         response_agent_a: RunResponse = await symptom_analyzer_agent.arun(
-            message=input_data.symptoms, session_id=session_id, user_id=str(user_id)
+            message=input_data.symptoms, 
+            session_id=session_id, 
+            user_id=str(user_id)
         )
         
         hypothesis_content = response_agent_a.content
@@ -158,14 +170,20 @@ async def websocket_orchestrator(websocket: WebSocket, token: str):
             "data": diagnosis_hypothesis.model_dump()
         })
 
-        await websocket.send_json({"status": "Step 2/4: Saving initial diagnosis to memory..."})
+        await websocket.send_json({"status": "Saving initial diagnosis to memory..."})
         memory_task_a = f"Based on our last interaction, please save this to your memory: The user's symptoms are '{input_data.symptoms}' and the diagnosis was '{diagnosis_hypothesis.diagnosis}'."
-        await symptom_analyzer_agent.arun(message=memory_task_a, session_id=session_id, user_id=str(user_id))
+        await symptom_analyzer_agent.arun(
+            message=memory_task_a, 
+            session_id=session_id, 
+            user_id=str(user_id)
+        )
 
-        await websocket.send_json({"status": "Step 3/4: Generating clinical plan..."})
+        await websocket.send_json({"status": "Generating clinical protocol..."})
         clinical_input_message = f"Diagnostic hypothesis: {diagnosis_hypothesis.diagnosis}. Justification: {diagnosis_hypothesis.justification}. Severity: {diagnosis_hypothesis.severity}."
         response_agent_b: RunResponse = await clinical_protocol_agent.arun(
-            message=clinical_input_message, session_id=session_id, user_id=str(user_id)
+            message=clinical_input_message, 
+            session_id=session_id, 
+            user_id=str(user_id)
         )
         action_content = response_agent_b.content
         if not action_content:
@@ -174,13 +192,17 @@ async def websocket_orchestrator(websocket: WebSocket, token: str):
         obj, _ = json.JSONDecoder().raw_decode(action_content.strip())
         clinical_action = ClinicalAction.model_validate(obj)
         await websocket.send_json({
-            "type": "plan_result",
+            "type": "protocol_result",
             "data": clinical_action.model_dump()
         })
         
-        await websocket.send_json({"status": "Step 4/4: Saving clinical plan to memory..."})
-        memory_task_b = f"For the diagnosis of '{diagnosis_hypothesis.diagnosis}', the suggested clinical plan has an urgency of '{clinical_action.urgency}'."
-        await clinical_protocol_agent.arun(message=memory_task_b, session_id=session_id, user_id=str(user_id))
+        await websocket.send_json({"status": "Saving clinical protocol to memory..."})
+        memory_task_b = f"For the diagnosis of '{diagnosis_hypothesis.diagnosis}', the suggested clinical protocol has an urgency of '{clinical_action.urgency}'."
+        await clinical_protocol_agent.arun(
+            message=memory_task_b, 
+            session_id=session_id, 
+            user_id=str(user_id)
+        )
 
         await websocket.send_json({"status": "Completed!"})
 

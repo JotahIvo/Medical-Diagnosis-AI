@@ -69,9 +69,9 @@ def test_websocket_orchestrator_successful_flow(client: TestClient):
             assert "status" in messages[0] and "Analyzing symptoms" in messages[0]["status"]
             assert messages[1]["type"] == "diagnosis_result" and "diagnosis" in messages[1]["data"]
             assert "status" in messages[2] and "Saving initial diagnosis" in messages[2]["status"]
-            assert "status" in messages[3] and "Generating clinical plan" in messages[3]["status"]
-            assert messages[4]["type"] == "plan_result" and "exam_recommendations" in messages[4]["data"]
-            assert "status" in messages[5] and "Saving clinical plan" in messages[5]["status"]
+            assert "status" in messages[3] and "Generating clinical protocol" in messages[3]["status"]
+            assert messages[4]["type"] == "protocol_result" and "exam_recommendations" in messages[4]["data"]
+            assert "status" in messages[5] and "Saving clinical protocol" in messages[5]["status"]
             assert messages[6]["status"] == "Completed!"
             logger.info("All messages were successfully validated.")
 
@@ -83,7 +83,7 @@ def test_websocket_orchestrator_successful_flow(client: TestClient):
             
             final_response_for_display = {
                 "diagnosis_hypothesis": final_diagnosis,
-                "clinical_action_plan": final_plan
+                "clinical_action_protocol": final_plan
             }
 
             print(json.dumps(final_response_for_display, indent=2, ensure_ascii=False))
