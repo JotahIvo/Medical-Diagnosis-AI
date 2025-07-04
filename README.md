@@ -168,7 +168,6 @@ $ docker compose up -d
 Esses comando servem para que as tabelas definida em app/db/models.py, sejam criadas no banco.
 
 ```bash
-$ alembic revision --autogenerate -m "Adiciona a tabela de usuários"
 $ alembic upgrade head
 ```
 
